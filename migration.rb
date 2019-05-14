@@ -43,6 +43,10 @@ module MigrationSub
           "Accept" => "application/json",
           "Content-Type" =>"application/json"
         }
+
+        @my_staging_info_header = {
+          "X-Recharge-Access-Token" => recharge_staging
+           }
   
         @api_key = ENV['SHOPIFY_API_KEY']
         @password = ENV['SHOPIFY_PASSWORD']
@@ -233,7 +237,7 @@ module MigrationSub
         new_sub_properties = update_sub_properties(my_sub.raw_line_item_properties, local_product_information, real_email)
         puts new_sub_properties.inspect
 
-        exit
+        
   
         new_sub = { "address_id": address_id,
           "customer_id": customer_id,
@@ -257,7 +261,7 @@ module MigrationSub
         determine_limits(recharge_limit, 0.65)
         puts create_sub.inspect
         if create_sub.code == 200
-          sub_id = create_address.parsed_response['subscription']['id']
+          sub_id = create_sub.parsed_response['subscription']['id']
           sub_creation_status = {"status" => true, "subscription_id" => sub_id}
           return sub_creation_status
         else
@@ -285,12 +289,18 @@ module MigrationSub
             if address_creation_status['status'] == true
               address_id = address_creation_status['address_id']
               subscription_creation_status = recharge_create_subscription(mysub, address_id, customer_id, real_email)
+              puts subscription_creation_status
               #mark subscription as done
-              mysub.migrated = true
-              time_updated = DateTime.now
-              time_updated_str = time_updated.strftime("%Y-%m-%d %H:%M:%S")
-              mysub.date_migrated = time_updated_str
-              mysub.save
+              if subscription_creation_status['status'] == true
+                mysub.migrated = true
+                time_updated = DateTime.now
+                time_updated_str = time_updated.strftime("%Y-%m-%d %H:%M:%S")
+                mysub.date_migrated = time_updated_str
+                mysub.save
+              else
+                puts "skipping this sub"
+                next
+              end
 
 
               my_duration = (Time.now - my_start_time ).ceil
@@ -302,14 +312,16 @@ module MigrationSub
 
             else
               puts "can't create address, skipping this subscription"
+              next
             end
 
           else
             puts "could not create customer, skipping this subscription"
+            next
           end
-          exit
+          #exit
         end
-
+        puts "All done migrating"
 
       end
 
@@ -321,6 +333,18 @@ module MigrationSub
         real_email = "jshima12@gmail.com"
         subscription_creation_status = recharge_create_subscription(mysub, address_id, customer_id, real_email)
 
+
+      end
+
+      def retrieve_subscription_info(subscription_id)
+        
+          #GET /subscriptions/<subscription_id>
+          subscription_info = HTTParty.get("https://api.rechargeapps.com/subscriptions/#{subscription_id}", :headers => @my_staging_info_header)
+          sub_info = subscription_info.parsed_response
+          puts sub_info
+  
+  
+       
 
       end
 

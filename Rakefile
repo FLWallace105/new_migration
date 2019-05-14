@@ -53,6 +53,12 @@ task :load_migration_info do |t|
   MigrationSub::SubUpdater.new.load_migration_product_information
 end
 
+desc 'get info on a subscription'
+task :get_info_subscription, [:args] do |t, args|
+  MigrationSub::SubUpdater.new.retrieve_subscription_info(*args)
+
+end
+
 
 end
 
