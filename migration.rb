@@ -14,6 +14,7 @@ require_relative 'lib/recharge_limit'
 require 'stripe'
 require 'recharge'
 require 'shopify_api'
+require 'securerandom'
 
 
 
@@ -90,17 +91,36 @@ module MigrationSub
         fake_email = real_email.gsub(/@\S+/i, "@zobha.com")
         #puts "#{real_email} --> #{fake_email}"
         #create customer object 
+        if sub.bad_sub == true
+          initial_string = SecureRandom.hex(6)
+          #Nuke the domain
+          fake_email = fake_email.gsub(/@\S+/i, "")
+          fake_email = fake_email + initial_string + "@zobha.com"
+          puts "fake_email = #{fake_email}"
+
+        end
+
+        local_billing_country = my_customer.billing_country
+        if my_customer.billing_country != 'United States'
+          local_billing_country = 'United States'
+        end
+        local_first_name = my_customer.first_name
+        if my_customer.first_name.length < 1
+          local_first_name = 'NoFirstName'
+        end
+        
+
         mybody = {"email" => fake_email,
-          "first_name" => my_customer.first_name,
+          "first_name" => local_first_name,
           "last_name" => my_customer.last_name,
-          "billing_first_name" => my_customer.first_name,
+          "billing_first_name" => local_first_name,
           "billing_last_name" => my_customer.last_name,
           "billing_address1" => my_customer.billing_address1,
           "billing_address2" => my_customer.billing_address2,
           "billing_zip" => my_customer.billing_zip,
           "billing_city" => my_customer.billing_city,
           "billing_province" => my_customer.billing_province,
-          "billing_country" => my_customer.billing_country,
+          "billing_country" => local_billing_country,
           "billing_phone" => my_customer.billing_phone,
           "stripe_customer_token" => @customer_stripe}.to_json
 
@@ -127,17 +147,25 @@ module MigrationSub
         local_customer_id = mysub.customer_id
         #puts customer_id
         my_customer = Customer.find_by_customer_id(local_customer_id)
+        local_billing_country = my_customer.billing_country
+        if my_customer.billing_country != 'United States'
+          local_billing_country = 'United States'
+        end
+        local_first_name = my_customer.first_name
+        if my_customer.first_name.length < 1
+          local_first_name = 'NoFirstName'
+        end
 
         my_address = {"address1" => my_customer.billing_address1,
           "address2" => my_customer.billing_address2,
           "city" => my_customer.billing_city,
           "province" => my_customer.billing_province,
-          "first_name" => my_customer.first_name,
+          "first_name" => local_first_name,
           "last_name" => my_customer.last_name,
           "zip" => my_customer.billing_zip,
           "company" => my_customer.billing_company,
           "phone" => my_customer.billing_phone,
-          "country" => my_customer.billing_country,
+          "country" => local_billing_country,
           "shipping_lines_override" => nil }.to_json
   
           create_address = HTTParty.post("https://api.rechargeapps.com/customers/#{customer_id}/addresses", :body => my_address, :headers => @my_staging_change_header)
@@ -153,7 +181,7 @@ module MigrationSub
             return address_creation_status
           else
             address_creation_status = {"status" => false}
-            return customer_creation_status
+            return address_creation_status
 
           end
   
@@ -161,6 +189,9 @@ module MigrationSub
 
       def determine_next_charge(scheduled_at)
         puts "scheduled_at = #{scheduled_at}"
+        if scheduled_at.nil?
+          scheduled_at = DateTime.now
+        end
         scheduled_at_str = scheduled_at.strftime('%Y-%m-%d %H:%M:%S %Z')
         puts scheduled_at_str
         
@@ -237,13 +268,24 @@ module MigrationSub
         new_sub_properties = update_sub_properties(my_sub.raw_line_item_properties, local_product_information, real_email)
         puts new_sub_properties.inspect
 
+        local_price = my_sub.price
+        if my_sub.price.nil? || my_sub.price == 0
+          #local_product_information.staging_product_title
+          if /5\sitems/i =~ local_product_information.staging_product_title
+            local_price = 49.95
+          else
+            local_price = 39.95
+          end
+
+        end
+
         
   
         new_sub = { "address_id": address_id,
           "customer_id": customer_id,
           "next_charge_scheduled_at": local_next_charge_scheduled_at,      
           "product_title": local_product_information.staging_product_title,
-          "price": my_sub.price,
+          "price": local_price,
           "quantity": my_sub.quantity,
           "status": "ACTIVE",
           "shopify_product_id": local_product_information.staging_product_id,
@@ -276,7 +318,7 @@ module MigrationSub
 
       def migrate_live_subs
         my_start_time = Time.now
-        my_subs_to_migrate = StagingSubscriptionMigration.where("migrated = ?", false)
+        my_subs_to_migrate = StagingSubscriptionMigration.where("migrated = ? ", false)
         my_subs_to_migrate.each do |mysub|
           puts mysub.inspect
           customer_creation_status = recharge_create_customer(mysub)
@@ -299,6 +341,8 @@ module MigrationSub
                 mysub.save
               else
                 puts "skipping this sub"
+                mysub.bad_sub = true
+                mysub.save
                 next
               end
 
@@ -312,11 +356,17 @@ module MigrationSub
 
             else
               puts "can't create address, skipping this subscription"
+              puts "skipping this sub"
+              mysub.bad_sub = true
+              mysub.save
               next
             end
 
           else
             puts "could not create customer, skipping this subscription"
+            puts "skipping this sub"
+            mysub.bad_sub = true
+            mysub.save
             next
           end
           #exit

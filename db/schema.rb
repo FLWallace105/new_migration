@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2019_05_14_181741) do
+ActiveRecord::Schema.define(version: 2019_05_16_060735) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -575,6 +575,7 @@ ActiveRecord::Schema.define(version: 2019_05_14_181741) do
     t.integer "expire_after_specific_number_charges"
     t.boolean "migrated", default: false
     t.datetime "date_migrated"
+    t.boolean "bad_sub", default: false
     t.index ["subscription_id"], name: "index_staging_subscriptions_migration_on_subscription_id"
   end
 
